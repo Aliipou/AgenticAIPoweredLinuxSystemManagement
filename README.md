@@ -1,4 +1,4 @@
-# Agentic — AI-Powered Linux System Management
+# Agentic  AI-Powered Linux System Management
 
 An intelligent system management layer that understands natural language, proposes safe OS actions, and logs everything for audit.
 
