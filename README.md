@@ -1,7 +1,7 @@
 <div align="center">
 
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/Tests-346%20passing-brightgreen?style=flat)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-375%20passing-brightgreen?style=flat)](tests/)
 [![Coverage](https://img.shields.io/badge/Coverage-100%25-brightgreen?style=flat)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 
@@ -16,13 +16,14 @@ Not an AI assistant. Not a chatbot. A runtime with formal authority boundaries.
 
 ## What Makes This Different
 
-Most "agentic" systems are LLM wrappers over shell — they parse a request and run a command. This system enforces three independent safety gates before any command reaches the OS:
+Most "agentic" systems are LLM wrappers over shell — they parse a request and run a command. This system enforces four independent safety gates before any command reaches the OS:
 
 1. **Confidence Gate** — if the LLM isn't certain enough, the action is refused or downgraded to dry-run. Confidence ≠ correctness, so both are tracked.
-2. **Policy Gate** — every action type carries a static risk level and sudo requirement. Actions above the configured threshold are blocked regardless of confidence. Stopping or restarting a critical service (PostgreSQL, nginx, Docker, sshd, etc.) auto-escalates to CRITICAL, blocking without `--force`.
-3. **Command Validator** — two-tier deterministic scan of the generated command and target strings. The syntactic tier catches `rm -rf /`, fork bombs, raw disk writes. The semantic tier catches commands that are safe-looking in isolation but catastrophic by effect: `find / -delete`, `chmod -R 777 /`, `chown -R` on `/etc`, deletion of `/etc/passwd` or `/boot/*`. All patterns are blocked unconditionally, regardless of policy approval.
+2. **Environment Gate** — deployment context enforces a hard risk ceiling before any other evaluation. `PRODUCTION` caps at MEDIUM; `STAGING` at HIGH; `DEVELOPMENT` is unrestricted. Set via `AGENTIC_ENVIRONMENT`. Denials are logged to the audit trail.
+3. **Policy Gate** — every action type carries a static risk level and sudo requirement. Actions above the configured threshold are blocked regardless of confidence. Stopping or restarting a critical service (PostgreSQL, nginx, Docker, sshd, etc.) auto-escalates to CRITICAL, blocking without `--force`.
+4. **Command Validator** — two-tier deterministic scan of the generated command and target strings. The syntactic tier catches `rm -rf /`, fork bombs, raw disk writes. The semantic tier catches commands that are safe-looking in isolation but catastrophic by effect: `find / -delete`, `chmod -R 777 /`, `chown -R` on `/etc`, deletion of `/etc/passwd` or `/boot/*`. All patterns are blocked unconditionally, regardless of policy approval.
 
-If all three gates pass, the executor runs the action. Every decision — approved or denied — is recorded in the audit log.
+If all four gates pass, the executor runs the action. Every decision — approved or denied — is recorded in the audit log.
 
 ---
 
@@ -44,6 +45,11 @@ User query
     │
     ▼
 [DecisionEngine]     Maps intent → ActionPlan via registered strategies
+    │
+    ▼
+[EnvironmentGate]    PRODUCTION → max MEDIUM cap
+                     STAGING    → max HIGH cap
+                     DEVELOPMENT → unrestricted
     │
     ▼
 [SafetyGate]         Per-action risk scoring against PERMISSION_MATRIX
@@ -155,7 +161,7 @@ pytest
 # Coverage is enforced at 100% — CI will fail if it drops
 ```
 
-346 tests. 100% line and branch coverage on all production code.
+375 tests. 100% line and branch coverage on all production code.
 
 ---
 
@@ -173,9 +179,12 @@ src/agentic/
   parser/          OpenAI intent classifier
   models/
     action.py              ← ActionType, ActionScope, ActionEffect, ActionCandidate
+  models/
+    environment.py         ← Environment enum (PRODUCTION/STAGING/DEVELOPMENT)
   policy/
     confidence_gate.py     ← LLM confidence gating
-    permissions.py         ← PERMISSION_MATRIX + CRITICAL_SERVICES
+    environment_gate.py    ← deployment-context risk ceiling
+    permissions.py         ← PERMISSION_MATRIX + CRITICAL_SERVICES + ENVIRONMENT_RISK_CAPS
     safety_gate.py         ← risk-level enforcement + critical service escalation
   pipeline.py      End-to-end orchestrator
 ```
