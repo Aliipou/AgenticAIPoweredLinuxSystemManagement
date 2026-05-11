@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from agentic.engine.action_registry import ActionRegistry
-from agentic.models.action import ActionPlan
+from agentic.models.action import ActionPlan, RollbackSupport
 from agentic.models.intent import IntentType, ParsedIntent
+from agentic.policy.permissions import ROLLBACK_CAPABILITIES
 
 
 class DecisionEngine:
@@ -28,6 +29,16 @@ class DecisionEngine:
             )
 
         actions = await strategy.generate_actions(intent)
+
+        # Stamp canonical rollback support from ROLLBACK_CAPABILITIES.
+        # Only applies when the strategy left rollback_support at the UNKNOWN default.
+        # Strategies that declare rollback_support explicitly are not overridden.
+        for action in actions:
+            if action.rollback_support == RollbackSupport.UNKNOWN:
+                canonical = ROLLBACK_CAPABILITIES.get(action.action_type)
+                if canonical is not None:
+                    action.rollback_support = canonical
+
         return ActionPlan(
             intent_id=intent.id,
             actions=actions,
