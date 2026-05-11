@@ -7,6 +7,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from agentic.models.environment import Environment
+
 
 class Settings(BaseSettings):
     model_config = {"env_prefix": "AGENTIC_"}
@@ -25,4 +27,8 @@ class Settings(BaseSettings):
     )
     require_confirmation: bool = Field(
         default=True, description="Require user confirmation for MEDIUM+ risk"
+    )
+    environment: Environment = Field(
+        default=Environment.DEVELOPMENT,
+        description="Deployment environment (PRODUCTION/STAGING/DEVELOPMENT)",
     )

@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentic.config.settings import Settings
+from agentic.models.environment import Environment
 
 
 class TestSettings:
@@ -48,6 +49,23 @@ class TestSettings:
         s = Settings()  # type: ignore[call-arg]
         assert isinstance(s.db_path, Path)
         assert s.db_path == Path("/tmp/test.db")
+
+    def test_environment_defaults_to_development(self, monkeypatch):
+        monkeypatch.setenv("AGENTIC_OPENAI_API_KEY", "sk-test")
+        s = Settings()  # type: ignore[call-arg]
+        assert s.environment == Environment.DEVELOPMENT
+
+    def test_environment_override_to_production(self, monkeypatch):
+        monkeypatch.setenv("AGENTIC_OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("AGENTIC_ENVIRONMENT", "PRODUCTION")
+        s = Settings()  # type: ignore[call-arg]
+        assert s.environment == Environment.PRODUCTION
+
+    def test_environment_override_to_staging(self, monkeypatch):
+        monkeypatch.setenv("AGENTIC_OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("AGENTIC_ENVIRONMENT", "STAGING")
+        s = Settings()  # type: ignore[call-arg]
+        assert s.environment == Environment.STAGING
 
     def test_env_prefix(self, monkeypatch):
         # Ensure non-prefixed vars don't affect settings

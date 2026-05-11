@@ -15,6 +15,7 @@ from agentic.models.action import ActionPlan, ActionResult
 from agentic.models.intent import IntentType, ParsedIntent
 from agentic.parser.intent_parser import IntentParser
 from agentic.policy.confidence_gate import ConfidenceGate
+from agentic.policy.environment_gate import EnvironmentGate
 from agentic.policy.safety_gate import SafetyGate
 
 
@@ -31,6 +32,7 @@ class Pipeline:
         confirm_callback=None,
         confidence_gate: ConfidenceGate | None = None,
         command_validator: CommandValidator | None = None,
+        environment_gate: EnvironmentGate | None = None,
     ) -> None:
         self._parser = parser
         self._engine = engine
@@ -42,6 +44,7 @@ class Pipeline:
         self._confirm_callback = confirm_callback
         self._confidence_gate = confidence_gate
         self._command_validator = command_validator
+        self._environment_gate = environment_gate
 
     async def run(self, query: str) -> tuple[ParsedIntent, ActionPlan, list[ActionResult]]:
         # 1. Get context
@@ -78,6 +81,23 @@ class Pipeline:
 
         if not plan.actions:
             return intent, plan, []
+
+        # 5.5: Environment gate — enforce deployment-context risk ceiling
+        if self._environment_gate is not None:
+            permitted, env_denied = self._environment_gate.filter_approved(plan)
+            for d in env_denied:
+                await self._store.log_policy_decision(
+                    action_id=d.action_id,
+                    risk_level=d.risk_level.value,
+                    approved=False,
+                    requires_sudo=d.requires_sudo,
+                    reason=d.reason,
+                )
+            if not permitted:
+                raise PolicyDeniedError(
+                    f"All actions blocked by {self._environment_gate.environment.value} environment policy."
+                )
+            plan = plan.model_copy(update={"actions": permitted})
 
         # 6. Evaluate policy
         decisions = self._gate.evaluate_plan(plan)

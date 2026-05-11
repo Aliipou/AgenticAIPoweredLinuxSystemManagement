@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentic.models.action import ActionCandidate, ActionEffect, ActionPlan, ActionResult, ActionScope, ActionType
+from agentic.models.environment import Environment
 from agentic.models.intent import Entity, IntentType, ParsedIntent
 from agentic.models.policy import PolicyDecision, RiskLevel
 
@@ -88,6 +89,20 @@ class TestParsedIntent:
         i1 = ParsedIntent(raw_query="a", intent_type=IntentType.FOCUS, confidence=0.5)
         i2 = ParsedIntent(raw_query="b", intent_type=IntentType.FOCUS, confidence=0.5)
         assert i1.id != i2.id
+
+
+class TestEnvironment:
+    def test_all_members(self):
+        expected = {"PRODUCTION", "STAGING", "DEVELOPMENT"}
+        actual = {m.value for m in Environment}
+        assert actual == expected
+
+    def test_from_value(self):
+        assert Environment("PRODUCTION") == Environment.PRODUCTION
+
+    def test_invalid_value(self):
+        with pytest.raises(ValueError):
+            Environment("UNKNOWN")
 
 
 class TestActionScope:

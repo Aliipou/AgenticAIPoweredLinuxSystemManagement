@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agentic.models.action import ActionType
+from agentic.models.environment import Environment
 from agentic.models.policy import RiskLevel
 
 # Each entry: (RiskLevel, requires_sudo)
@@ -17,6 +18,14 @@ PERMISSION_MATRIX: dict[ActionType, tuple[RiskLevel, bool]] = {
     ActionType.SYSTEMCTL_START: (RiskLevel.MEDIUM, True),
     ActionType.SYSTEMCTL_STOP: (RiskLevel.HIGH, True),
     ActionType.SYSTEMCTL_RESTART: (RiskLevel.HIGH, True),
+}
+
+# Risk ceiling per deployment environment.
+# Operators set AGENTIC_ENVIRONMENT to enforce this at boot time.
+ENVIRONMENT_RISK_CAPS: dict[Environment, str] = {
+    Environment.PRODUCTION: "MEDIUM",      # APT_UPGRADE / SYSTEMCTL_STOP require explicit --force
+    Environment.STAGING: "HIGH",           # mirrors current SafetyGate default
+    Environment.DEVELOPMENT: "CRITICAL",   # unrestricted — dev only
 }
 
 # Services whose availability is critical; stopping/restarting any of these
