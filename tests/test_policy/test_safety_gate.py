@@ -6,7 +6,7 @@ import pytest
 
 from agentic.models.action import ActionCandidate, ActionPlan, ActionType
 from agentic.models.policy import PolicyDecision, RiskLevel
-from agentic.policy.permissions import PERMISSION_MATRIX
+from agentic.policy.permissions import CRITICAL_SERVICES, PERMISSION_MATRIX
 from agentic.policy.risk_levels import is_above_threshold, requires_user_confirmation, risk_from_string
 from agentic.policy.safety_gate import SafetyGate
 
@@ -227,3 +227,79 @@ class TestSafetyGate:
             assert decision.approved is True
         finally:
             permissions.PERMISSION_MATRIX[ActionType.KILL_PROCESS] = original
+
+
+class TestCriticalServices:
+    def test_critical_services_frozenset_not_empty(self):
+        assert len(CRITICAL_SERVICES) > 0
+        assert "postgresql" in CRITICAL_SERVICES
+        assert "nginx" in CRITICAL_SERVICES
+        assert "docker" in CRITICAL_SERVICES
+
+    def test_systemctl_stop_postgresql_escalates_to_critical(self):
+        gate = SafetyGate(max_risk_level="CRITICAL")
+        action = ActionCandidate(
+            action_type=ActionType.SYSTEMCTL_STOP,
+            description="Stop postgres",
+            target="postgresql",
+        )
+        decision = gate.evaluate(action)
+        assert decision.risk_level == RiskLevel.CRITICAL
+        assert decision.approved is False
+        assert "--force" in decision.reason
+
+    def test_systemctl_restart_nginx_escalates_to_critical(self):
+        gate = SafetyGate(max_risk_level="CRITICAL")
+        action = ActionCandidate(
+            action_type=ActionType.SYSTEMCTL_RESTART,
+            description="Restart nginx",
+            target="nginx",
+        )
+        decision = gate.evaluate(action)
+        assert decision.risk_level == RiskLevel.CRITICAL
+        assert decision.approved is False
+
+    def test_systemctl_stop_critical_service_allowed_with_force(self):
+        gate = SafetyGate(max_risk_level="CRITICAL", force=True)
+        action = ActionCandidate(
+            action_type=ActionType.SYSTEMCTL_STOP,
+            description="Stop postgres",
+            target="postgresql",
+        )
+        decision = gate.evaluate(action)
+        assert decision.risk_level == RiskLevel.CRITICAL
+        assert decision.approved is True
+
+    def test_systemctl_stop_non_critical_service_stays_high(self):
+        gate = SafetyGate(max_risk_level="HIGH")
+        action = ActionCandidate(
+            action_type=ActionType.SYSTEMCTL_STOP,
+            description="Stop cups",
+            target="cups",
+        )
+        decision = gate.evaluate(action)
+        assert decision.risk_level == RiskLevel.HIGH
+        assert decision.approved is True
+
+    def test_systemctl_start_critical_service_not_escalated(self):
+        # Only STOP and RESTART escalate; START does not
+        gate = SafetyGate(max_risk_level="HIGH")
+        action = ActionCandidate(
+            action_type=ActionType.SYSTEMCTL_START,
+            description="Start postgresql",
+            target="postgresql",
+        )
+        decision = gate.evaluate(action)
+        assert decision.risk_level == RiskLevel.MEDIUM
+        assert decision.approved is True
+
+    def test_critical_service_target_case_insensitive(self):
+        gate = SafetyGate(max_risk_level="CRITICAL")
+        action = ActionCandidate(
+            action_type=ActionType.SYSTEMCTL_STOP,
+            description="Stop docker",
+            target="Docker",
+        )
+        decision = gate.evaluate(action)
+        assert decision.risk_level == RiskLevel.CRITICAL
+        assert decision.approved is False

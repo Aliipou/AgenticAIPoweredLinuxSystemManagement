@@ -18,3 +18,18 @@ PERMISSION_MATRIX: dict[ActionType, tuple[RiskLevel, bool]] = {
     ActionType.SYSTEMCTL_STOP: (RiskLevel.HIGH, True),
     ActionType.SYSTEMCTL_RESTART: (RiskLevel.HIGH, True),
 }
+
+# Services whose availability is critical; stopping/restarting any of these
+# escalates to CRITICAL risk regardless of the base matrix entry.
+CRITICAL_SERVICES: frozenset[str] = frozenset({
+    "postgresql", "postgres", "pg",
+    "mysql", "mysqld", "mariadb",
+    "mongodb", "mongod",
+    "nginx", "apache2", "httpd", "lighttpd", "haproxy",
+    "docker", "dockerd", "containerd", "kubelet",
+    "elasticsearch", "redis", "redis-server",
+    "rabbitmq", "rabbitmq-server",
+    "kafka",
+    "sshd", "ssh",
+    "ufw", "iptables", "nftables",
+})

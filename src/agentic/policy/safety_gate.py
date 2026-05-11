@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from agentic.models.action import ActionCandidate, ActionPlan
+from agentic.models.action import ActionCandidate, ActionPlan, ActionType
 from agentic.models.policy import PolicyDecision, RiskLevel
-from agentic.policy.permissions import PERMISSION_MATRIX
+from agentic.policy.permissions import CRITICAL_SERVICES, PERMISSION_MATRIX
 from agentic.policy.risk_levels import is_above_threshold, requires_user_confirmation, risk_from_string
+
+_SERVICE_MUTATING = frozenset({ActionType.SYSTEMCTL_STOP, ActionType.SYSTEMCTL_RESTART})
 
 
 class SafetyGate:
@@ -17,6 +19,10 @@ class SafetyGate:
         risk_level, requires_sudo = PERMISSION_MATRIX.get(
             action.action_type, (RiskLevel.MEDIUM, False)
         )
+
+        # Escalate to CRITICAL when stopping/restarting a known critical service.
+        if action.action_type in _SERVICE_MUTATING and action.target.lower() in CRITICAL_SERVICES:
+            risk_level = RiskLevel.CRITICAL
 
         if risk_level == RiskLevel.CRITICAL and not self._force:
             return PolicyDecision(

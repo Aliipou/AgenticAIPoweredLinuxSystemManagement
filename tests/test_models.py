@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentic.models.action import ActionCandidate, ActionPlan, ActionResult, ActionType
+from agentic.models.action import ActionCandidate, ActionEffect, ActionPlan, ActionResult, ActionScope, ActionType
 from agentic.models.intent import Entity, IntentType, ParsedIntent
 from agentic.models.policy import PolicyDecision, RiskLevel
 
@@ -90,6 +90,40 @@ class TestParsedIntent:
         assert i1.id != i2.id
 
 
+class TestActionScope:
+    def test_all_members(self):
+        expected = {"PROCESS", "FILESYSTEM", "PACKAGE", "SERVICE", "MEMORY", "NETWORK", "SYSTEM"}
+        actual = {m.value for m in ActionScope}
+        assert actual == expected
+
+    def test_from_value(self):
+        assert ActionScope("SERVICE") == ActionScope.SERVICE
+
+    def test_invalid_value(self):
+        with pytest.raises(ValueError):
+            ActionScope("INVALID")
+
+
+class TestActionEffect:
+    def test_defaults(self):
+        e = ActionEffect(scope=ActionScope.PROCESS)
+        assert e.reversible is True
+        assert e.data_loss_risk is False
+        assert e.availability_impact is False
+
+    def test_all_fields(self):
+        e = ActionEffect(
+            scope=ActionScope.FILESYSTEM,
+            reversible=False,
+            data_loss_risk=True,
+            availability_impact=True,
+        )
+        assert e.scope == ActionScope.FILESYSTEM
+        assert e.reversible is False
+        assert e.data_loss_risk is True
+        assert e.availability_impact is True
+
+
 class TestActionType:
     def test_all_members_exist(self):
         expected = {
@@ -113,6 +147,22 @@ class TestActionCandidate:
         assert a.target == ""
         assert a.parameters == {}
         assert a.rollback_command == ""
+
+    def test_effect_defaults_to_none(self):
+        a = ActionCandidate(action_type=ActionType.KILL_PROCESS, description="Kill")
+        assert a.effect is None
+
+    def test_effect_set(self):
+        effect = ActionEffect(scope=ActionScope.SERVICE, availability_impact=True)
+        a = ActionCandidate(
+            action_type=ActionType.SYSTEMCTL_STOP,
+            description="Stop nginx",
+            target="nginx",
+            effect=effect,
+        )
+        assert a.effect is not None
+        assert a.effect.scope == ActionScope.SERVICE
+        assert a.effect.availability_impact is True
 
     def test_uuid_generation(self):
         a1 = ActionCandidate(action_type=ActionType.KILL_PROCESS, description="a")

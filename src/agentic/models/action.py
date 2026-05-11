@@ -22,6 +22,25 @@ class ActionType(str, enum.Enum):
     SYSTEMCTL_RESTART = "SYSTEMCTL_RESTART"
 
 
+class ActionScope(str, enum.Enum):
+    PROCESS = "PROCESS"
+    FILESYSTEM = "FILESYSTEM"
+    PACKAGE = "PACKAGE"
+    SERVICE = "SERVICE"
+    MEMORY = "MEMORY"
+    NETWORK = "NETWORK"
+    SYSTEM = "SYSTEM"
+
+
+class ActionEffect(BaseModel):
+    """Formal description of what an action does to system state."""
+
+    scope: ActionScope
+    reversible: bool = True
+    data_loss_risk: bool = False
+    availability_impact: bool = False
+
+
 class ActionCandidate(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     action_type: ActionType
@@ -30,6 +49,7 @@ class ActionCandidate(BaseModel):
     target: str = ""
     parameters: dict[str, str] = Field(default_factory=dict)
     rollback_command: str = ""
+    effect: ActionEffect | None = None
 
 
 class ActionPlan(BaseModel):

@@ -145,6 +145,102 @@ class TestCommandValidatorValidateMany:
         assert returned_action is action
 
 
+class TestCommandValidatorSemanticPatterns:
+    """Semantic safety patterns — dangerous by effect, not by obvious syntax."""
+
+    def test_find_delete_on_root(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="find / -delete"))
+        assert result.valid is False
+        assert "find -delete" in result.reason
+
+    def test_find_double_dash_delete_on_root(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="find / --delete"))
+        assert result.valid is False
+        assert "find -delete" in result.reason
+
+    def test_find_delete_on_root_with_args(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="find / -type f -name '*.log' -delete"))
+        assert result.valid is False
+
+    def test_find_exec_rm_on_root(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="find / -name '*.tmp' -exec rm {} \\;"))
+        assert result.valid is False
+        assert "find -exec rm" in result.reason
+
+    def test_find_delete_on_subdirectory_passes(self):
+        # find /home/user -delete is not covered — only / root is blocked
+        v = CommandValidator()
+        result = v.validate(_action(command="find /home/user -delete"))
+        assert result.valid is True
+
+    def test_chmod_recursive_world_writable_on_root(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="chmod -R 777 /"))
+        assert result.valid is False
+        assert "chmod" in result.reason
+
+    def test_chmod_recursive_world_writable_variant(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="chmod -R 0777 /"))
+        assert result.valid is False
+
+    def test_chmod_recursive_safe_on_subdir_passes(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="chmod -R 755 /var/www"))
+        assert result.valid is True
+
+    def test_chown_recursive_on_etc(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="chown -R attacker /etc"))
+        assert result.valid is False
+        assert "chown" in result.reason
+
+    def test_chown_recursive_on_boot(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="chown -R nobody /boot"))
+        assert result.valid is False
+
+    def test_chown_recursive_on_usr(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="chown -R user /usr"))
+        assert result.valid is False
+
+    def test_chown_recursive_on_home_passes(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="chown -R user /home/user"))
+        assert result.valid is True
+
+    def test_rm_etc_passwd(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="rm /etc/passwd"))
+        assert result.valid is False
+        assert "critical system file" in result.reason
+
+    def test_rm_etc_shadow(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="rm -f /etc/shadow"))
+        assert result.valid is False
+
+    def test_rm_etc_sudoers(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="rm /etc/sudoers"))
+        assert result.valid is False
+
+    def test_rm_boot_file(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="rm /boot/vmlinuz"))
+        assert result.valid is False
+
+    def test_rm_etc_passwd_in_target(self):
+        v = CommandValidator()
+        result = v.validate(_action(command="echo test", target="rm /etc/passwd"))
+        assert result.valid is False
+
+
 class TestValidationResultDataclass:
     def test_frozen(self):
         vr = ValidationResult(valid=True, reason="ok")
