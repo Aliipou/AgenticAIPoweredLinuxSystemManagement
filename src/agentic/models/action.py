@@ -41,6 +41,19 @@ class ActionEffect(BaseModel):
     availability_impact: bool = False
 
 
+class ActionSimulation(BaseModel):
+    """Predicted effect of an ActionCandidate before execution."""
+
+    action_id: str
+    predicted_scope: ActionScope
+    reversible: bool = True
+    data_loss_risk: bool = False
+    availability_impact: bool = False
+    would_require_sudo: bool = False
+    simulated_output: str = ""
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ActionCandidate(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     action_type: ActionType
@@ -50,6 +63,10 @@ class ActionCandidate(BaseModel):
     parameters: dict[str, str] = Field(default_factory=dict)
     rollback_command: str = ""
     effect: ActionEffect | None = None
+    # Action IR — declarative specification of intent and constraints
+    preconditions: list[str] = Field(default_factory=list)
+    postconditions: list[str] = Field(default_factory=list)
+    required_capabilities: list[str] = Field(default_factory=list)
 
 
 class ActionPlan(BaseModel):
@@ -60,6 +77,7 @@ class ActionPlan(BaseModel):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+    simulations: list[ActionSimulation] = Field(default_factory=list)
 
 
 class ActionResult(BaseModel):

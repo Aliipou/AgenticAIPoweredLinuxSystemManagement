@@ -14,6 +14,9 @@ from agentic.memory.store import MemoryStore
 from agentic.models.action import ActionPlan, ActionResult
 from agentic.models.intent import IntentType, ParsedIntent
 from agentic.parser.intent_parser import IntentParser
+from agentic.executor.simulation_engine import SimulationEngine
+from agentic.executor.transaction import TransactionManager
+from agentic.policy.capability_gate import CapabilityGate
 from agentic.policy.confidence_gate import ConfidenceGate
 from agentic.policy.environment_gate import EnvironmentGate
 from agentic.policy.safety_gate import SafetyGate
@@ -33,6 +36,9 @@ class Pipeline:
         confidence_gate: ConfidenceGate | None = None,
         command_validator: CommandValidator | None = None,
         environment_gate: EnvironmentGate | None = None,
+        capability_gate: CapabilityGate | None = None,
+        simulation_engine: SimulationEngine | None = None,
+        transaction_manager: TransactionManager | None = None,
     ) -> None:
         self._parser = parser
         self._engine = engine
@@ -45,6 +51,9 @@ class Pipeline:
         self._confidence_gate = confidence_gate
         self._command_validator = command_validator
         self._environment_gate = environment_gate
+        self._capability_gate = capability_gate
+        self._simulation_engine = simulation_engine
+        self._transaction_manager = transaction_manager
 
     async def run(self, query: str) -> tuple[ParsedIntent, ActionPlan, list[ActionResult]]:
         # 1. Get context
@@ -99,6 +108,21 @@ class Pipeline:
                 )
             plan = plan.model_copy(update={"actions": permitted})
 
+        # 5.6: Capability gate — least-privilege enforcement
+        if self._capability_gate is not None:
+            cap_permitted, cap_denied = self._capability_gate.filter_approved(plan)
+            for d in cap_denied:
+                await self._store.log_policy_decision(
+                    action_id=d.action_id,
+                    risk_level=d.risk_level.value,
+                    approved=False,
+                    requires_sudo=d.requires_sudo,
+                    reason=d.reason,
+                )
+            if not cap_permitted:
+                raise PolicyDeniedError("All actions blocked by capability policy.")
+            plan = plan.model_copy(update={"actions": cap_permitted})
+
         # 6. Evaluate policy
         decisions = self._gate.evaluate_plan(plan)
         approved_actions, approved_decisions = self._gate.filter_approved(plan, decisions)
@@ -138,6 +162,13 @@ class Pipeline:
                 if not vr.valid:
                     raise UnsafeCommandError(vr.reason, action_id=action.id)
 
+        # 6.7: Simulation engine — pre-execution effect prediction (non-blocking)
+        if self._simulation_engine is not None:
+            sims = self._simulation_engine.simulate_plan(
+                plan.model_copy(update={"actions": approved_actions})
+            )
+            plan = plan.model_copy(update={"simulations": sims})
+
         # 7. User confirmation (if needed and not in dry-run mode)
         needs_confirm = any(d.requires_confirmation for d in approved_decisions)
         if needs_confirm and not effective_dry_run and self._confirm_callback:
@@ -145,10 +176,16 @@ class Pipeline:
             if not confirmed:
                 raise UserCancelledError("User cancelled execution.")
 
-        # 8. Execute
-        results = await self._executor.execute_many(
-            approved_actions, dry_run=effective_dry_run
-        )
+        # 8. Execute (with rollback if TransactionManager is wired in)
+        if self._transaction_manager is not None:
+            tx = await self._transaction_manager.execute_with_rollback(
+                approved_actions, self._executor, dry_run=effective_dry_run
+            )
+            results = tx.results
+        else:
+            results = await self._executor.execute_many(
+                approved_actions, dry_run=effective_dry_run
+            )
 
         # 9. Log results
         for result in results:

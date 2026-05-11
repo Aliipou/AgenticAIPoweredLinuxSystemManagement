@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentic.models.action import ActionCandidate, ActionEffect, ActionPlan, ActionResult, ActionScope, ActionType
+from agentic.models.action import ActionCandidate, ActionEffect, ActionPlan, ActionResult, ActionScope, ActionSimulation, ActionType
+from agentic.models.capability import Capability
 from agentic.models.environment import Environment
 from agentic.models.intent import Entity, IntentType, ParsedIntent
 from agentic.models.policy import PolicyDecision, RiskLevel
@@ -91,6 +92,20 @@ class TestParsedIntent:
         assert i1.id != i2.id
 
 
+class TestCapabilityModel:
+    def test_all_members(self):
+        expected = {"KILL_PROCESS", "SUSPEND_PROCESS", "RENICE_PROCESS",
+                    "PACKAGE_MANAGEMENT", "MEMORY_MANAGEMENT", "SERVICE_MANAGEMENT"}
+        assert {c.value for c in Capability} == expected
+
+    def test_from_value(self):
+        assert Capability("MEMORY_MANAGEMENT") == Capability.MEMORY_MANAGEMENT
+
+    def test_invalid_value(self):
+        with pytest.raises(ValueError):
+            Capability("NONEXISTENT")
+
+
 class TestEnvironment:
     def test_all_members(self):
         expected = {"PRODUCTION", "STAGING", "DEVELOPMENT"}
@@ -167,6 +182,24 @@ class TestActionCandidate:
         a = ActionCandidate(action_type=ActionType.KILL_PROCESS, description="Kill")
         assert a.effect is None
 
+    def test_action_ir_defaults(self):
+        a = ActionCandidate(action_type=ActionType.KILL_PROCESS, description="Kill")
+        assert a.preconditions == []
+        assert a.postconditions == []
+        assert a.required_capabilities == []
+
+    def test_action_ir_fields_set(self):
+        a = ActionCandidate(
+            action_type=ActionType.SUSPEND_PROCESS,
+            description="Suspend",
+            preconditions=["process exists"],
+            postconditions=["process suspended"],
+            required_capabilities=["SUSPEND_PROCESS"],
+        )
+        assert a.preconditions == ["process exists"]
+        assert a.postconditions == ["process suspended"]
+        assert a.required_capabilities == ["SUSPEND_PROCESS"]
+
     def test_effect_set(self):
         effect = ActionEffect(scope=ActionScope.SERVICE, availability_impact=True)
         a = ActionCandidate(
@@ -185,17 +218,51 @@ class TestActionCandidate:
         assert a1.id != a2.id
 
 
+class TestActionSimulation:
+    def test_defaults(self):
+        s = ActionSimulation(action_id="a1", predicted_scope=ActionScope.PROCESS)
+        assert s.reversible is True
+        assert s.data_loss_risk is False
+        assert s.availability_impact is False
+        assert s.would_require_sudo is False
+        assert s.simulated_output == ""
+        assert s.warnings == []
+
+    def test_all_fields(self):
+        s = ActionSimulation(
+            action_id="a1",
+            predicted_scope=ActionScope.SERVICE,
+            reversible=False,
+            data_loss_risk=True,
+            availability_impact=True,
+            would_require_sudo=True,
+            simulated_output="[SIMULATED] ...",
+            warnings=["warning 1"],
+        )
+        assert s.predicted_scope == ActionScope.SERVICE
+        assert s.reversible is False
+        assert s.data_loss_risk is True
+        assert s.warnings == ["warning 1"]
+
+
 class TestActionPlan:
     def test_defaults(self):
         p = ActionPlan(intent_id="i1")
         assert p.actions == []
         assert p.reasoning == ""
         assert p.created_at is not None
+        assert p.simulations == []
 
     def test_with_actions(self):
         a = ActionCandidate(action_type=ActionType.KILL_PROCESS, description="Kill")
         p = ActionPlan(intent_id="i1", actions=[a])
         assert len(p.actions) == 1
+
+    def test_with_simulations(self):
+        sim = ActionSimulation(action_id="a1", predicted_scope=ActionScope.PROCESS)
+        p = ActionPlan(intent_id="i1", simulations=[sim])
+        assert len(p.simulations) == 1
+        assert p.simulations[0].action_id == "a1"
 
 
 class TestActionResult:

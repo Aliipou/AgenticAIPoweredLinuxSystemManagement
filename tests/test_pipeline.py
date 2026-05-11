@@ -10,8 +10,12 @@ import pytest
 from agentic.exceptions import LowConfidenceError, PolicyDeniedError, UnsafeCommandError, UserCancelledError
 from agentic.executor.command_validator import CommandValidator
 from agentic.policy.confidence_gate import ConfidenceGate
+from agentic.executor.simulation_engine import SimulationEngine
+from agentic.executor.transaction import TransactionManager, TransactionResult
+from agentic.policy.capability_gate import CapabilityGate
 from agentic.policy.environment_gate import EnvironmentGate
 from agentic.models.action import ActionCandidate, ActionPlan, ActionResult, ActionType
+from agentic.models.capability import Capability
 from agentic.models.environment import Environment
 from agentic.models.intent import IntentType, ParsedIntent
 from agentic.models.policy import PolicyDecision, RiskLevel
@@ -523,3 +527,167 @@ class TestPipelineEnvironmentGate:
         pipeline = Pipeline(**mock_pipeline_deps, environment_gate=None)
         _, _, results = await pipeline.run("test")
         assert len(results) == 1
+
+
+class TestPipelineCapabilityGate:
+    @pytest.mark.asyncio
+    async def test_capability_gate_blocks_all_raises_policy_denied(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = ActionCandidate(
+            id="act-pkg",
+            action_type=ActionType.APT_UPGRADE,
+            description="Upgrade",
+        )
+        plan = _make_plan(actions=[action])
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+
+        gate = CapabilityGate(frozenset())  # no capabilities granted
+        pipeline = Pipeline(**mock_pipeline_deps, capability_gate=gate)
+        with pytest.raises(PolicyDeniedError, match="capability"):
+            await pipeline.run("upgrade")
+
+        mock_pipeline_deps["executor"].execute_many.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_capability_gate_logs_denied_actions(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = ActionCandidate(id="a1", action_type=ActionType.APT_UPGRADE, description="Upgrade")
+        plan = _make_plan(actions=[action])
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+
+        gate = CapabilityGate(frozenset())
+        pipeline = Pipeline(**mock_pipeline_deps, capability_gate=gate)
+        with pytest.raises(PolicyDeniedError):
+            await pipeline.run("upgrade")
+
+        mock_pipeline_deps["store"].log_policy_decision.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_capability_gate_permits_granted_action(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = ActionCandidate(
+            id="a1", action_type=ActionType.SUSPEND_PROCESS, description="Suspend",
+            command="kill -STOP 1", target="chrome",
+        )
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+        result = ActionResult(action_id=action.id, success=True, output="done")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+        mock_pipeline_deps["executor"].execute_many = AsyncMock(return_value=[result])
+
+        gate = CapabilityGate(frozenset({Capability.SUSPEND_PROCESS}))
+        pipeline = Pipeline(**mock_pipeline_deps, capability_gate=gate)
+        _, _, results = await pipeline.run("suspend chrome")
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_capability_gate_none_is_noop(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = _make_action()
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+        result = ActionResult(action_id=action.id, success=True, output="done")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+        mock_pipeline_deps["executor"].execute_many = AsyncMock(return_value=[result])
+
+        pipeline = Pipeline(**mock_pipeline_deps, capability_gate=None)
+        _, _, results = await pipeline.run("test")
+        assert len(results) == 1
+
+
+class TestPipelineSimulationEngine:
+    @pytest.mark.asyncio
+    async def test_simulation_engine_populates_plan_simulations(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = ActionCandidate(
+            id="a1", action_type=ActionType.SUSPEND_PROCESS, description="Suspend",
+            command="kill -STOP 1", target="chrome",
+        )
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+        result = ActionResult(action_id=action.id, success=True, output="done")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+        mock_pipeline_deps["executor"].execute_many = AsyncMock(return_value=[result])
+
+        pipeline = Pipeline(**mock_pipeline_deps, simulation_engine=SimulationEngine())
+        _, returned_plan, _ = await pipeline.run("suspend chrome")
+
+        assert len(returned_plan.simulations) == 1
+        assert returned_plan.simulations[0].action_id == action.id
+
+    @pytest.mark.asyncio
+    async def test_simulation_engine_none_leaves_plan_simulations_empty(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = _make_action()
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+        result = ActionResult(action_id=action.id, success=True, output="done")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+        mock_pipeline_deps["executor"].execute_many = AsyncMock(return_value=[result])
+
+        pipeline = Pipeline(**mock_pipeline_deps, simulation_engine=None)
+        _, returned_plan, _ = await pipeline.run("test")
+        assert returned_plan.simulations == []
+
+
+class TestPipelineTransactionManager:
+    @pytest.mark.asyncio
+    async def test_transaction_manager_used_instead_of_execute_many(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = _make_action()
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+        result = ActionResult(action_id=action.id, success=True, output="done")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+
+        tm = TransactionManager()
+        mock_pipeline_deps["executor"].execute = AsyncMock(return_value=result)
+
+        pipeline = Pipeline(**mock_pipeline_deps, transaction_manager=tm)
+        _, _, results = await pipeline.run("test")
+
+        assert len(results) == 1
+        mock_pipeline_deps["executor"].execute_many.assert_not_called()
+        mock_pipeline_deps["executor"].execute.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_transaction_manager_none_uses_execute_many(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = _make_action()
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+        result = ActionResult(action_id=action.id, success=True, output="done")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+        mock_pipeline_deps["executor"].execute_many = AsyncMock(return_value=[result])
+
+        pipeline = Pipeline(**mock_pipeline_deps, transaction_manager=None)
+        _, _, results = await pipeline.run("test")
+
+        assert len(results) == 1
+        mock_pipeline_deps["executor"].execute_many.assert_called_once()
