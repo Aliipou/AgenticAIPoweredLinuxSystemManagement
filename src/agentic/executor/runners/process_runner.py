@@ -13,7 +13,19 @@ from agentic.executor.runners.base import BaseRunner
 from agentic.models.action import ActionCandidate, ActionResult, ActionType
 
 ESSENTIAL_PROCESSES = frozenset({
-    "init", "systemd", "kernel", "kthreadd", "sshd", "login",
+    # PID 1 and core kernel
+    "init", "systemd", "kernel", "kthreadd",
+    # systemd service managers
+    "systemd-journald", "systemd-logind", "systemd-udevd",
+    "systemd-resolved", "systemd-networkd", "systemd-timesyncd",
+    # Authentication and session
+    "sshd", "login", "su", "sudo",
+    # IPC and security
+    "dbus", "dbus-daemon", "polkit", "auditd", "rsyslogd", "syslogd",
+    # Display managers
+    "Xorg", "gdm", "gdm3", "lightdm", "sddm",
+    # Network essentials
+    "NetworkManager", "wpa_supplicant", "dhclient", "dhcpcd",
 })
 
 # Windows lacks SIGSTOP/SIGCONT — use SIGTERM as fallback

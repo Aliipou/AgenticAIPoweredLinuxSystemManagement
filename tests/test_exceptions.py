@@ -7,8 +7,10 @@ import pytest
 from agentic.exceptions import (
     AgenticError,
     ExecutionError,
+    LowConfidenceError,
     ParseError,
     PolicyDeniedError,
+    UnsafeCommandError,
     UserCancelledError,
 )
 
@@ -63,3 +65,32 @@ class TestExceptionInstantiation:
     def test_catch_execution_as_agentic(self):
         with pytest.raises(AgenticError):
             raise ExecutionError("test", action_id="x")
+
+    def test_low_confidence_inherits(self):
+        assert issubclass(LowConfidenceError, AgenticError)
+
+    def test_unsafe_command_inherits(self):
+        assert issubclass(UnsafeCommandError, AgenticError)
+
+
+class TestNewExceptions:
+    def test_low_confidence_error(self):
+        err = LowConfidenceError("confidence too low")
+        assert str(err) == "confidence too low"
+
+    def test_low_confidence_as_agentic(self):
+        with pytest.raises(AgenticError):
+            raise LowConfidenceError("low")
+
+    def test_unsafe_command_error_with_action_id(self):
+        err = UnsafeCommandError("rm -rf / detected", action_id="act-99")
+        assert str(err) == "rm -rf / detected"
+        assert err.action_id == "act-99"
+
+    def test_unsafe_command_error_default_action_id(self):
+        err = UnsafeCommandError("dangerous")
+        assert err.action_id == ""
+
+    def test_unsafe_command_as_agentic(self):
+        with pytest.raises(AgenticError):
+            raise UnsafeCommandError("unsafe", action_id="x")

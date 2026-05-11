@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentic.exceptions import PolicyDeniedError, UserCancelledError
+from agentic.exceptions import LowConfidenceError, PolicyDeniedError, UnsafeCommandError, UserCancelledError
+from agentic.executor.command_validator import CommandValidator
+from agentic.policy.confidence_gate import ConfidenceGate
 from agentic.models.action import ActionCandidate, ActionPlan, ActionResult, ActionType
 from agentic.models.intent import IntentType, ParsedIntent
 from agentic.models.policy import PolicyDecision, RiskLevel
@@ -286,3 +288,149 @@ class TestPipelineRun:
         pipeline = Pipeline(**mock_pipeline_deps)
         await pipeline.run("test")
         mock_pipeline_deps["context_retriever"].format_context.assert_called_once_with("test")
+
+
+class TestPipelineConfidenceGate:
+    @pytest.mark.asyncio
+    async def test_low_confidence_raises(self, mock_pipeline_deps):
+        # Confidence gate rejects → LowConfidenceError before engine is called
+        intent = _make_intent(intent_type=IntentType.FOCUS, confidence=0.50)
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+
+        gate = ConfidenceGate(min_confidence=0.70, dry_run_below=0.85)
+        pipeline = Pipeline(**mock_pipeline_deps, confidence_gate=gate)
+
+        with pytest.raises(LowConfidenceError):
+            await pipeline.run("test")
+
+        mock_pipeline_deps["engine"].decide.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_force_dry_run_overrides_false_dry_run(self, mock_pipeline_deps):
+        # Confidence in [min, dry_run_below) → execute_many called with dry_run=True
+        intent = _make_intent(intent_type=IntentType.FOCUS, confidence=0.75)
+        action = _make_action()
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+        result = ActionResult(action_id=action.id, success=True, output="[DRY RUN]")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+        mock_pipeline_deps["executor"].execute_many = AsyncMock(return_value=[result])
+
+        gate = ConfidenceGate(min_confidence=0.70, dry_run_below=0.85)
+        pipeline = Pipeline(**mock_pipeline_deps, dry_run=False, confidence_gate=gate)
+        await pipeline.run("test")
+
+        mock_pipeline_deps["executor"].execute_many.assert_called_once_with(
+            [action], dry_run=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_high_confidence_uses_pipeline_dry_run(self, mock_pipeline_deps):
+        # Confidence above dry_run_below → effective_dry_run = pipeline's dry_run
+        intent = _make_intent(intent_type=IntentType.FOCUS, confidence=0.95)
+        action = _make_action()
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+        result = ActionResult(action_id=action.id, success=True, output="done")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+        mock_pipeline_deps["executor"].execute_many = AsyncMock(return_value=[result])
+
+        gate = ConfidenceGate(min_confidence=0.70, dry_run_below=0.85)
+        pipeline = Pipeline(**mock_pipeline_deps, dry_run=False, confidence_gate=gate)
+        await pipeline.run("test")
+
+        mock_pipeline_deps["executor"].execute_many.assert_called_once_with(
+            [action], dry_run=False
+        )
+
+    @pytest.mark.asyncio
+    async def test_force_dry_run_skips_confirmation(self, mock_pipeline_deps):
+        # When force_dry_run=True, confirmation callback must NOT be called
+        intent = _make_intent(intent_type=IntentType.FOCUS, confidence=0.75)
+        action = _make_action()
+        plan = _make_plan(actions=[action])
+        decision = PolicyDecision(
+            action_id=action.id,
+            risk_level=RiskLevel.MEDIUM,
+            approved=True,
+            requires_confirmation=True,
+        )
+        result = ActionResult(action_id=action.id, success=True, output="[DRY RUN]")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+        mock_pipeline_deps["executor"].execute_many = AsyncMock(return_value=[result])
+
+        confirm_called = []
+        gate = ConfidenceGate(min_confidence=0.70, dry_run_below=0.85)
+        pipeline = Pipeline(
+            **mock_pipeline_deps,
+            dry_run=False,
+            confidence_gate=gate,
+            confirm_callback=lambda a, d: confirm_called.append(True) or True,
+        )
+        await pipeline.run("test")
+
+        assert confirm_called == [], "Confirmation must not be triggered in forced dry-run mode"
+
+
+class TestPipelineCommandValidator:
+    @pytest.mark.asyncio
+    async def test_unsafe_command_raises(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = ActionCandidate(
+            id="act-unsafe",
+            action_type=ActionType.SUSPEND_PROCESS,
+            description="Bad action",
+            command="rm -rf /",
+            target="root",
+        )
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+
+        pipeline = Pipeline(**mock_pipeline_deps, command_validator=CommandValidator())
+        with pytest.raises(UnsafeCommandError, match="rm -rf /"):
+            await pipeline.run("test")
+
+        mock_pipeline_deps["executor"].execute_many.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_safe_command_passes_validator(self, mock_pipeline_deps):
+        intent = _make_intent()
+        action = ActionCandidate(
+            id="act-safe",
+            action_type=ActionType.SUSPEND_PROCESS,
+            description="Safe action",
+            command="kill -STOP 1234",
+            target="firefox",
+        )
+        plan = _make_plan(actions=[action])
+        decision = _make_decision(action_id=action.id, approved=True)
+        result = ActionResult(action_id=action.id, success=True, output="done")
+
+        mock_pipeline_deps["parser"].parse = AsyncMock(return_value=intent)
+        mock_pipeline_deps["engine"].decide = AsyncMock(return_value=plan)
+        mock_pipeline_deps["gate"].evaluate_plan.return_value = [decision]
+        mock_pipeline_deps["gate"].filter_approved.return_value = ([action], [decision])
+        mock_pipeline_deps["executor"].execute_many = AsyncMock(return_value=[result])
+
+        pipeline = Pipeline(**mock_pipeline_deps, command_validator=CommandValidator())
+        _, _, results = await pipeline.run("test")
+
+        assert len(results) == 1
+        mock_pipeline_deps["executor"].execute_many.assert_called_once()

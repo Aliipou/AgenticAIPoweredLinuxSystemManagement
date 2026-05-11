@@ -25,3 +25,15 @@ class ExecutionError(AgenticError):
 
 class UserCancelledError(AgenticError):
     """Raised when the user cancels a confirmation prompt."""
+
+
+class LowConfidenceError(AgenticError):
+    """Raised when parsed intent confidence is below the minimum threshold."""
+
+
+class UnsafeCommandError(AgenticError):
+    """Raised when a command fails the deterministic safety validator."""
+
+    def __init__(self, message: str, action_id: str = "") -> None:
+        super().__init__(message)
+        self.action_id = action_id

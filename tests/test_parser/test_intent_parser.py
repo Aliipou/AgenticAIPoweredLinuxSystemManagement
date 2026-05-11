@@ -44,7 +44,7 @@ class TestSchemas:
 
     def test_schema_intent_type_enum(self):
         enum_vals = INTENT_JSON_SCHEMA["schema"]["properties"]["intent_type"]["enum"]
-        assert set(enum_vals) == {"FOCUS", "UPDATE", "CLEAN_MEMORY", "UNKNOWN"}
+        assert set(enum_vals) == {"FOCUS", "UPDATE", "CLEAN_MEMORY", "OBSERVE", "NETWORK", "STORAGE", "UNKNOWN"}
 
     def test_schema_entities_structure(self):
         items = INTENT_JSON_SCHEMA["schema"]["properties"]["entities"]["items"]

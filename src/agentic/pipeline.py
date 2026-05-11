@@ -5,14 +5,16 @@ from __future__ import annotations
 import uuid
 
 from agentic.engine.decision_engine import DecisionEngine
-from agentic.exceptions import PolicyDeniedError, UserCancelledError
+from agentic.exceptions import LowConfidenceError, PolicyDeniedError, UnsafeCommandError, UserCancelledError
 from agentic.executor.action_executor import ActionExecutor
+from agentic.executor.command_validator import CommandValidator
 from agentic.memory.context import ContextRetriever
 from agentic.memory.models import ActionRecord, ExecutionRecord, RequestRecord
 from agentic.memory.store import MemoryStore
 from agentic.models.action import ActionPlan, ActionResult
 from agentic.models.intent import IntentType, ParsedIntent
 from agentic.parser.intent_parser import IntentParser
+from agentic.policy.confidence_gate import ConfidenceGate
 from agentic.policy.safety_gate import SafetyGate
 
 
@@ -27,6 +29,8 @@ class Pipeline:
         context_retriever: ContextRetriever,
         dry_run: bool = False,
         confirm_callback=None,
+        confidence_gate: ConfidenceGate | None = None,
+        command_validator: CommandValidator | None = None,
     ) -> None:
         self._parser = parser
         self._engine = engine
@@ -36,6 +40,8 @@ class Pipeline:
         self._context = context_retriever
         self._dry_run = dry_run
         self._confirm_callback = confirm_callback
+        self._confidence_gate = confidence_gate
+        self._command_validator = command_validator
 
     async def run(self, query: str) -> tuple[ParsedIntent, ActionPlan, list[ActionResult]]:
         # 1. Get context
@@ -54,9 +60,18 @@ class Pipeline:
             )
         )
 
-        # 4. Check for low-confidence / unknown
+        # 4. Check for UNKNOWN
         if intent.intent_type == IntentType.UNKNOWN:
             return intent, ActionPlan(intent_id=intent.id, reasoning="Unknown intent"), []
+
+        # 4.5: Confidence gate — deterministic guard against LLM hallucination
+        effective_dry_run = self._dry_run
+        if self._confidence_gate is not None:
+            cd = self._confidence_gate.evaluate(intent)
+            if not cd.passed:
+                raise LowConfidenceError(cd.reason)
+            if cd.force_dry_run:
+                effective_dry_run = True
 
         # 5. Generate action plan
         plan = await self._engine.decide(intent)
@@ -97,16 +112,22 @@ class Pipeline:
                 )
             )
 
-        # 7. User confirmation (if needed and not dry-run)
+        # 6.5: Command validator — deterministic pre-flight safety check
+        if self._command_validator is not None:
+            for action, vr in self._command_validator.validate_many(approved_actions):
+                if not vr.valid:
+                    raise UnsafeCommandError(vr.reason, action_id=action.id)
+
+        # 7. User confirmation (if needed and not in dry-run mode)
         needs_confirm = any(d.requires_confirmation for d in approved_decisions)
-        if needs_confirm and not self._dry_run and self._confirm_callback:
+        if needs_confirm and not effective_dry_run and self._confirm_callback:
             confirmed = self._confirm_callback(approved_actions, approved_decisions)
             if not confirmed:
                 raise UserCancelledError("User cancelled execution.")
 
         # 8. Execute
         results = await self._executor.execute_many(
-            approved_actions, dry_run=self._dry_run
+            approved_actions, dry_run=effective_dry_run
         )
 
         # 9. Log results

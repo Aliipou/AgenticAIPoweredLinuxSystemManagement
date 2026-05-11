@@ -10,7 +10,7 @@ INTENT_JSON_SCHEMA: dict = {
         "properties": {
             "intent_type": {
                 "type": "string",
-                "enum": ["FOCUS", "UPDATE", "CLEAN_MEMORY", "UNKNOWN"],
+                "enum": ["FOCUS", "UPDATE", "CLEAN_MEMORY", "OBSERVE", "NETWORK", "STORAGE", "UNKNOWN"],
                 "description": "The classified intent type.",
             },
             "confidence": {

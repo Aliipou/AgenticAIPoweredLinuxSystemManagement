@@ -15,6 +15,9 @@ class TestIntentType:
         assert IntentType.FOCUS == "FOCUS"
         assert IntentType.UPDATE == "UPDATE"
         assert IntentType.CLEAN_MEMORY == "CLEAN_MEMORY"
+        assert IntentType.OBSERVE == "OBSERVE"
+        assert IntentType.NETWORK == "NETWORK"
+        assert IntentType.STORAGE == "STORAGE"
         assert IntentType.UNKNOWN == "UNKNOWN"
 
     def test_from_value(self):

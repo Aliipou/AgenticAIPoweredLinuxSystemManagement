@@ -13,6 +13,9 @@ class IntentType(str, enum.Enum):
     FOCUS = "FOCUS"
     UPDATE = "UPDATE"
     CLEAN_MEMORY = "CLEAN_MEMORY"
+    OBSERVE = "OBSERVE"    # read-only: list processes, check disk/memory/cpu status
+    NETWORK = "NETWORK"    # network management: interfaces, firewall, connectivity
+    STORAGE = "STORAGE"    # disk/filesystem: usage, cleanup, mount points
     UNKNOWN = "UNKNOWN"
 
 
