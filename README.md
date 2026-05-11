@@ -1,7 +1,7 @@
 <div align="center">
 
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/Tests-447%20passing-brightgreen?style=flat)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-471%20passing-brightgreen?style=flat)](tests/)
 [![Coverage](https://img.shields.io/badge/Coverage-100%25-brightgreen?style=flat)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 
@@ -142,6 +142,36 @@ Each action type requires exactly one capability. The runtime is granted a `froz
 
 ---
 
+## Rollback Honesty
+
+Every action carries an explicit `RollbackSupport` declaration. The system does not pretend rollback is possible when it isn't.
+
+| Value | Meaning |
+|-------|---------|
+| `FULL` | Prior state completely restorable |
+| `PARTIAL` | Rollback attempts but residual effects may remain |
+| `NONE` | No rollback path exists — execution is permanent |
+| `UNKNOWN` | Not declared — engine falls back to static high-impact table |
+
+### Canonical Rollback Truth Table (`ROLLBACK_CAPABILITIES`)
+
+| Action | Rollback Support | Reason |
+|--------|-----------------|--------|
+| `SUSPEND_PROCESS` | FULL | `kill -CONT` exactly reverses `kill -STOP` |
+| `RENICE_PROCESS` | FULL | renice back to original value |
+| `DROP_CACHES` | FULL | caches refill naturally from memory pressure |
+| `SYSTEMCTL_START` | FULL | can stop what was started |
+| `SYSTEMCTL_STOP` | FULL | can start what was stopped |
+| `SYSTEMCTL_RESTART` | PARTIAL | service restarts; in-flight requests are lost |
+| `APT_INSTALL` | PARTIAL | apt-remove works but config files remain |
+| `KILL_PROCESS` | NONE | process terminated — cannot be undone |
+| `KILL_BY_MEMORY` | NONE | process terminated — cannot be undone |
+| `APT_UPGRADE` | NONE | no safe general downgrade path |
+
+`TransactionManager._rollback()` skips any action with `RollbackSupport.NONE` — even if a `rollback_command` is set — because attempting rollback would be dishonest about what is actually recoverable.
+
+---
+
 ## Semantic Safety Patterns
 
 The Command Validator rejects commands that are **dangerous by effect**, not just by syntax:
@@ -222,7 +252,7 @@ pytest
 # Coverage is enforced at 100% — CI will fail if it drops
 ```
 
-447 tests. 100% line and branch coverage on all production code.
+471 tests. 100% line and branch coverage on all production code.
 
 ---
 

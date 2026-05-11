@@ -32,6 +32,13 @@ class ActionScope(str, enum.Enum):
     SYSTEM = "SYSTEM"
 
 
+class RollbackSupport(str, enum.Enum):
+    FULL = "FULL"        # rollback completely restores prior state
+    PARTIAL = "PARTIAL"  # rollback attempts but residual effects may remain
+    NONE = "NONE"        # no rollback path exists for this action type
+    UNKNOWN = "UNKNOWN"  # rollback support not declared (treated as UNKNOWN)
+
+
 class ActionEffect(BaseModel):
     """Formal description of what an action does to system state."""
 
@@ -67,6 +74,7 @@ class ActionCandidate(BaseModel):
     preconditions: list[str] = Field(default_factory=list)
     postconditions: list[str] = Field(default_factory=list)
     required_capabilities: list[str] = Field(default_factory=list)
+    rollback_support: RollbackSupport = RollbackSupport.UNKNOWN
 
 
 class ActionPlan(BaseModel):

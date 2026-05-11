@@ -12,6 +12,7 @@ from agentic.models.action import (
     ActionScope,
     ActionSimulation,
     ActionType,
+    RollbackSupport,
 )
 
 
@@ -192,6 +193,90 @@ class TestSimulationEngineSimulatePlan:
         assert all(isinstance(s, ActionSimulation) for s in sims)
         assert sims[0].action_id == actions[0].id
         assert sims[1].action_id == actions[1].id
+
+
+class TestSimulationEngineRollbackSupport:
+    """Tests for RollbackSupport-based reversibility logic (derived path only)."""
+
+    def test_rollback_full_yields_reversible(self):
+        engine = SimulationEngine()
+        action = ActionCandidate(
+            action_type=ActionType.APT_UPGRADE,
+            description="Upgrade",
+            rollback_support=RollbackSupport.FULL,
+        )
+        sim = engine.simulate(action)
+        assert sim.reversible is True
+
+    def test_rollback_full_no_partial_warning(self):
+        engine = SimulationEngine()
+        action = ActionCandidate(
+            action_type=ActionType.SYSTEMCTL_RESTART,
+            description="Restart",
+            rollback_support=RollbackSupport.FULL,
+        )
+        sim = engine.simulate(action)
+        assert not any("partial" in w.lower() or "residual" in w.lower() for w in sim.warnings)
+
+    def test_rollback_partial_yields_reversible(self):
+        engine = SimulationEngine()
+        action = ActionCandidate(
+            action_type=ActionType.APT_UPGRADE,
+            description="Upgrade",
+            rollback_support=RollbackSupport.PARTIAL,
+        )
+        sim = engine.simulate(action)
+        assert sim.reversible is True
+
+    def test_rollback_partial_adds_residual_warning(self):
+        engine = SimulationEngine()
+        action = ActionCandidate(
+            action_type=ActionType.APT_INSTALL,
+            description="Install",
+            rollback_support=RollbackSupport.PARTIAL,
+        )
+        sim = engine.simulate(action)
+        assert any("residual" in w.lower() for w in sim.warnings)
+
+    def test_rollback_none_yields_not_reversible(self):
+        engine = SimulationEngine()
+        action = ActionCandidate(
+            action_type=ActionType.SUSPEND_PROCESS,
+            description="Suspend",
+            rollback_support=RollbackSupport.NONE,
+        )
+        sim = engine.simulate(action)
+        assert sim.reversible is False
+
+    def test_rollback_none_adds_irreversibility_warning(self):
+        engine = SimulationEngine()
+        action = ActionCandidate(
+            action_type=ActionType.KILL_PROCESS,
+            description="Kill",
+            rollback_support=RollbackSupport.NONE,
+        )
+        sim = engine.simulate(action)
+        assert any("not reversible" in w for w in sim.warnings)
+
+    def test_rollback_unknown_high_impact_not_reversible(self):
+        engine = SimulationEngine()
+        action = ActionCandidate(
+            action_type=ActionType.APT_UPGRADE,
+            description="Upgrade",
+            rollback_support=RollbackSupport.UNKNOWN,
+        )
+        sim = engine.simulate(action)
+        assert sim.reversible is False
+
+    def test_rollback_unknown_low_impact_reversible(self):
+        engine = SimulationEngine()
+        action = ActionCandidate(
+            action_type=ActionType.SUSPEND_PROCESS,
+            description="Suspend",
+            rollback_support=RollbackSupport.UNKNOWN,
+        )
+        sim = engine.simulate(action)
+        assert sim.reversible is True
 
 
 class TestSimulationLookupTables:

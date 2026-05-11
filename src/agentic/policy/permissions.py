@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentic.models.action import ActionType
+from agentic.models.action import ActionType, RollbackSupport
 from agentic.models.environment import Environment
 from agentic.models.policy import RiskLevel
 
@@ -26,6 +26,23 @@ ENVIRONMENT_RISK_CAPS: dict[Environment, str] = {
     Environment.PRODUCTION: "MEDIUM",      # APT_UPGRADE / SYSTEMCTL_STOP require explicit --force
     Environment.STAGING: "HIGH",           # mirrors current SafetyGate default
     Environment.DEVELOPMENT: "CRITICAL",   # unrestricted — dev only
+}
+
+# Honest rollback truth table — what can actually be undone after execution.
+# FULL    → prior state fully restorable
+# PARTIAL → rollback attempts but residual effects remain (config, in-flight requests)
+# NONE    → no rollback path exists; execution is permanent
+ROLLBACK_CAPABILITIES: dict[ActionType, RollbackSupport] = {
+    ActionType.SUSPEND_PROCESS: RollbackSupport.FULL,      # kill -CONT reverses kill -STOP exactly
+    ActionType.RENICE_PROCESS: RollbackSupport.FULL,       # renice back to original value
+    ActionType.DROP_CACHES: RollbackSupport.FULL,          # caches refill naturally from memory pressure
+    ActionType.SYSTEMCTL_START: RollbackSupport.FULL,      # can stop what was started
+    ActionType.SYSTEMCTL_STOP: RollbackSupport.FULL,       # can start what was stopped
+    ActionType.SYSTEMCTL_RESTART: RollbackSupport.PARTIAL, # service restarts; in-flight requests lost
+    ActionType.APT_INSTALL: RollbackSupport.PARTIAL,       # apt-remove works but config files remain
+    ActionType.KILL_PROCESS: RollbackSupport.NONE,         # process terminated — cannot be undone
+    ActionType.KILL_BY_MEMORY: RollbackSupport.NONE,       # process terminated — cannot be undone
+    ActionType.APT_UPGRADE: RollbackSupport.NONE,          # no safe general downgrade path
 }
 
 # Services whose availability is critical; stopping/restarting any of these

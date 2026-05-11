@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentic.models.action import ActionCandidate, ActionEffect, ActionPlan, ActionResult, ActionScope, ActionSimulation, ActionType
+from agentic.models.action import ActionCandidate, ActionEffect, ActionPlan, ActionResult, ActionScope, ActionSimulation, ActionType, RollbackSupport
 from agentic.models.capability import Capability
 from agentic.models.environment import Environment
 from agentic.models.intent import Entity, IntentType, ParsedIntent
@@ -118,6 +118,31 @@ class TestEnvironment:
     def test_invalid_value(self):
         with pytest.raises(ValueError):
             Environment("UNKNOWN")
+
+
+class TestRollbackSupport:
+    def test_all_members(self):
+        expected = {"FULL", "PARTIAL", "NONE", "UNKNOWN"}
+        assert {m.value for m in RollbackSupport} == expected
+
+    def test_from_value(self):
+        assert RollbackSupport("FULL") == RollbackSupport.FULL
+
+    def test_invalid_value(self):
+        with pytest.raises(ValueError):
+            RollbackSupport("COMPLETE")
+
+    def test_action_candidate_default_is_unknown(self):
+        a = ActionCandidate(action_type=ActionType.KILL_PROCESS, description="Kill")
+        assert a.rollback_support == RollbackSupport.UNKNOWN
+
+    def test_action_candidate_rollback_support_set(self):
+        a = ActionCandidate(
+            action_type=ActionType.SUSPEND_PROCESS,
+            description="Suspend",
+            rollback_support=RollbackSupport.FULL,
+        )
+        assert a.rollback_support == RollbackSupport.FULL
 
 
 class TestActionScope:

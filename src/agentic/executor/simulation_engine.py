@@ -1,4 +1,14 @@
-"""Simulation engine — predicts action effects before execution touches the OS."""
+"""Rule-based effect prediction — estimates action impact before execution.
+
+This is NOT a full runtime simulator. It is a static prediction engine that
+derives expected effects from declared ActionEffect metadata or from static
+lookup tables keyed on ActionType. Predictions are deterministic but cannot
+account for runtime state (running processes, disk usage, service health).
+
+Use predictions for: pre-flight warnings, audit logging, operator visibility.
+Do NOT use predictions as: execution guards, security controls, or correctness
+proofs. All actual safety enforcement happens in the gate chain before this runs.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +18,7 @@ from agentic.models.action import (
     ActionScope,
     ActionSimulation,
     ActionType,
+    RollbackSupport,
 )
 from agentic.policy.permissions import PERMISSION_MATRIX
 
@@ -38,10 +49,10 @@ _AVAILABILITY_IMPACT: frozenset[ActionType] = frozenset({
 
 
 class SimulationEngine:
-    """Predicts the effect of an action or plan without executing anything.
+    """Static effect predictor.
 
-    Uses the action's declared ActionEffect when present; otherwise derives
-    predictions from action type via static lookup tables.
+    Uses declared ActionEffect when present. Otherwise derives predictions
+    from RollbackSupport declaration and action type lookup tables.
     """
 
     def simulate(self, action: ActionCandidate) -> ActionSimulation:
@@ -52,15 +63,25 @@ class SimulationEngine:
             availability = action.effect.availability_impact
         else:
             scope = _ACTION_SCOPES[action.action_type]
-            reversible = action.action_type not in _HIGH_IMPACT
             data_loss = False
             availability = action.action_type in _AVAILABILITY_IMPACT
+            rs = action.rollback_support
+            if rs == RollbackSupport.NONE:
+                reversible = False
+            elif rs in (RollbackSupport.FULL, RollbackSupport.PARTIAL):
+                reversible = True
+            else:  # UNKNOWN — fall back to static high-impact table
+                reversible = action.action_type not in _HIGH_IMPACT
 
         _, requires_sudo = PERMISSION_MATRIX.get(action.action_type, (None, False))
 
         warnings: list[str] = []
+        if action.effect is None and action.rollback_support == RollbackSupport.PARTIAL:
+            warnings.append(
+                "Rollback is partial — residual effects may remain after recovery."
+            )
         if not reversible:
-            warnings.append(f"{action.action_type.value} may not be easily reversible.")
+            warnings.append(f"{action.action_type.value} is not reversible.")
         if data_loss:
             warnings.append("Action carries data loss risk.")
         if availability:

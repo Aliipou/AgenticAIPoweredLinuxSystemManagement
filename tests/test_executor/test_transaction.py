@@ -6,7 +6,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from agentic.executor.transaction import TransactionManager, TransactionResult
-from agentic.models.action import ActionCandidate, ActionResult, ActionType
+from agentic.models.action import ActionCandidate, ActionResult, ActionType, RollbackSupport
 
 
 def _action(action_id: str = "a1", rollback: str = "") -> ActionCandidate:
@@ -158,6 +158,28 @@ class TestTransactionManagerRollback:
         assert result.success is False
         assert result.rolled_back_ids == []
         assert any("a1" in e and "restore failed" in e for e in result.rollback_errors)
+
+    @pytest.mark.asyncio
+    async def test_rollback_none_skips_even_with_rollback_command(self):
+        a1 = ActionCandidate(
+            id="a1",
+            action_type=ActionType.KILL_PROCESS,
+            description="Kill",
+            command="kill -9 123",
+            rollback_command="restore",
+            rollback_support=RollbackSupport.NONE,
+        )
+        a2 = _action("a2")
+
+        executor = AsyncMock()
+        executor.execute = AsyncMock(side_effect=[_ok("a1"), _fail("a2")])
+
+        tm = TransactionManager()
+        result = await tm.execute_with_rollback([a1, a2], executor)
+
+        assert result.success is False
+        assert "a1" not in result.rolled_back_ids
+        executor.rollback.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_rollback_in_reverse_order(self):

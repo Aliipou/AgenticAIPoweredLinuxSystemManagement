@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from agentic.executor.action_executor import ActionExecutor
-from agentic.models.action import ActionCandidate, ActionResult
+from agentic.models.action import ActionCandidate, ActionResult, RollbackSupport
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,8 @@ class TransactionManager:
 
         for action in reversed(executed):
             if not action.rollback_command:
+                continue
+            if action.rollback_support == RollbackSupport.NONE:
                 continue
             rb_result = await executor.rollback(action)
             if rb_result.success:

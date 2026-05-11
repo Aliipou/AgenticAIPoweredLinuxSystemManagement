@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentic.models.action import ActionCandidate, ActionPlan, ActionType
+from agentic.models.action import ActionCandidate, ActionPlan, ActionType, RollbackSupport
 from agentic.models.policy import PolicyDecision, RiskLevel
-from agentic.policy.permissions import CRITICAL_SERVICES, PERMISSION_MATRIX
+from agentic.policy.permissions import CRITICAL_SERVICES, PERMISSION_MATRIX, ROLLBACK_CAPABILITIES
 from agentic.policy.risk_levels import is_above_threshold, requires_user_confirmation, risk_from_string
 from agentic.policy.safety_gate import SafetyGate
 
@@ -227,6 +227,42 @@ class TestSafetyGate:
             assert decision.approved is True
         finally:
             permissions.PERMISSION_MATRIX[ActionType.KILL_PROCESS] = original
+
+
+class TestRollbackCapabilities:
+    def test_all_action_types_present(self):
+        from agentic.policy.permissions import ROLLBACK_CAPABILITIES
+        for at in ActionType:
+            assert at in ROLLBACK_CAPABILITIES, f"{at} missing from ROLLBACK_CAPABILITIES"
+
+    def test_values_are_rollback_support_instances(self):
+        from agentic.policy.permissions import ROLLBACK_CAPABILITIES
+        for at, rs in ROLLBACK_CAPABILITIES.items():
+            assert isinstance(rs, RollbackSupport), f"{at} has non-RollbackSupport value"
+
+    def test_kill_process_is_none(self):
+        assert ROLLBACK_CAPABILITIES[ActionType.KILL_PROCESS] == RollbackSupport.NONE
+
+    def test_kill_by_memory_is_none(self):
+        assert ROLLBACK_CAPABILITIES[ActionType.KILL_BY_MEMORY] == RollbackSupport.NONE
+
+    def test_apt_upgrade_is_none(self):
+        assert ROLLBACK_CAPABILITIES[ActionType.APT_UPGRADE] == RollbackSupport.NONE
+
+    def test_suspend_process_is_full(self):
+        assert ROLLBACK_CAPABILITIES[ActionType.SUSPEND_PROCESS] == RollbackSupport.FULL
+
+    def test_renice_process_is_full(self):
+        assert ROLLBACK_CAPABILITIES[ActionType.RENICE_PROCESS] == RollbackSupport.FULL
+
+    def test_drop_caches_is_full(self):
+        assert ROLLBACK_CAPABILITIES[ActionType.DROP_CACHES] == RollbackSupport.FULL
+
+    def test_systemctl_restart_is_partial(self):
+        assert ROLLBACK_CAPABILITIES[ActionType.SYSTEMCTL_RESTART] == RollbackSupport.PARTIAL
+
+    def test_apt_install_is_partial(self):
+        assert ROLLBACK_CAPABILITIES[ActionType.APT_INSTALL] == RollbackSupport.PARTIAL
 
 
 class TestCriticalServices:
