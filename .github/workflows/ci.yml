@@ -14,10 +14,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - run: pip install ruff
-      - run: ruff check . --select E,F,I --ignore E501,E402,E711,E712,F401,F841 || true
-      - run: ruff format --check . || true
+      - run: ruff check . --select E,F,I --ignore E501,E402,E711,E712,F401,F841
+      - run: ruff format --check .
 
   test:
     name: Test
@@ -27,17 +27,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install pytest pytest-cov anthropic
-          pip install -r requirements.txt 2>/dev/null || true
-          pip install -e . 2>/dev/null || true
+          pip install pytest pytest-asyncio pytest-cov openai psutil aiosqlite httpx pydantic pydantic-settings typer rich
+          pip install -e .
       - name: Run tests
-        run: pytest tests/ -v --cov --cov-report=xml -x || true
+        run: pytest tests/ -v --cov=agentic --cov-report=xml --cov-report=term-missing
         env:
-          REDIS_URL: redis://localhost:6379/0
-          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
+          AGENTIC_OPENAI_API_KEY: sk-test-placeholder
       - uses: codecov/codecov-action@v4
         with:
           file: coverage.xml
